@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Photos</title>
+<link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login">
+  <div class="login-icon"></div>
+  <div class="login-app-name">Photos</div>
+  <div class="login-sub">Your private photo library</div>
+  <div class="login-note">You'll stay signed in for 24 hours</div>
+  <div class="login-fields">
+    <div class="pw-wrap">
+      <input class="pw-input" type="password" id="pw"
+             placeholder="Password" autocomplete="current-password" spellcheck="false" autofocus>
+      <button class="pw-eye" id="pw-eye" tabindex="-1" type="button">
+        <svg width="22" height="16" viewBox="0 0 20 14" fill="none">
+          <path d="M1 7s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z"
+                stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="10" cy="7" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <line id="eye-slash" x1="2" y1="1" x2="18" y2="13"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="display:none"/>
+        </svg>
+      </button>
+    </div>
+    <button class="unlock-btn" id="unlock-btn">Unlock</button>
+    <div class="login-err" id="login-err"></div>
+  </div>
+</div>
+
+<!-- GALLERY -->
+<div id="gallery">
+  <div class="g-header">
+    <div class="g-header-inner">
+      <div>
+        <div class="g-title">Library</div>
+        <div class="g-date" id="g-date"></div>
+      </div>
+      <div class="g-actions">
+        <div class="zoom-btns">
+          <button class="btn-circle" id="zoom-out" aria-label="Zoom Out">−</button>
+          <button class="btn-circle" id="zoom-in" aria-label="Zoom In">+</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="g-scroll" id="g-scroll">
+    <div class="photo-grid" id="grid"></div>
+    <div class="load-ind" id="load-ind"><div class="spinner"></div></div>
+    <button id="load-more-btn" style="display:none; margin: 20px auto; padding: 12px 24px; background: #0a84ff; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer;">Load More</button>
+    <div class="sentinel" id="sentinel"></div>
+  </div>
+  <div class="tab-bar">
+    <div class="tab-items">
+      <button class="tab-btn" data-tab="years">Years</button>
+      <button class="tab-btn" data-tab="months">Months</button>
+      <button class="tab-btn active" data-tab="all">All</button>
+    </div>
+    <button class="tab-search" aria-label="Search">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="7" cy="7" r="5" stroke="white" stroke-width="1.8"/>
+        <path d="M11 11l3.5 3.5" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- LIGHTBOX -->
+<div id="lightbox">
+  <button class="lb-close-btn" id="lb-close">
+    <svg width="13" height="13" viewBox="0 0 11 11" fill="none">
+      <path d="M1 1l9 9M10 1L1 10" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </button>
+  <div class="lb-stage" id="lb-stage">
+    <div class="lb-track" id="lb-track"></div>
+  </div>
+  <div class="lb-count" id="lb-count"></div>
+</div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
