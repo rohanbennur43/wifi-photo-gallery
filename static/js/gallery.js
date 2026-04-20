@@ -35,30 +35,26 @@ export function startGallery() {
   setupZoomButtons();
   setupPinchZoom();
 
-  // Load More button
-  $('load-more-btn').addEventListener('click', () => {
-    fetchBatch();
-  });
-
-  // Scroll listener for infinite scroll
+  // Scroll listener for infinite scroll - very aggressive on WiFi
   const scrollEl = $('g-scroll');
   scrollEl.addEventListener('scroll', () => {
     const scrollTop = scrollEl.scrollTop;
     const scrollHeight = scrollEl.scrollHeight;
     const clientHeight = scrollEl.clientHeight;
-    const scrolledToBottom = scrollTop + clientHeight >= scrollHeight - 300;
+    // Trigger when 1500px from bottom (load next batch very early)
+    const scrolledToBottom = scrollTop + clientHeight >= scrollHeight - 1500;
 
     if (scrolledToBottom && !loading && hasMore) {
       fetchBatch();
     }
   }, { passive: true });
 
-  // Intersection observer for sentinel
+  // Intersection observer for sentinel - extremely aggressive prefetch
   new IntersectionObserver(([e]) => {
     if (e.isIntersecting && !loading && hasMore) {
       fetchBatch();
     }
-  }, {rootMargin:'100px'}).observe($('sentinel'));
+  }, {rootMargin:'1000px'}).observe($('sentinel'));
 
   // Tab switching
   document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
@@ -78,7 +74,7 @@ async function fetchBatch() {
       const headers = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const r = await fetch(`/api/media?offset=${offset}&limit=24`, {
+      const r = await fetch(`/api/media?offset=${offset}&limit=500`, {
         credentials: 'same-origin',
         headers
       });
@@ -95,19 +91,13 @@ async function fetchBatch() {
       total = d.total;
       hasMore = d.hasMore;
       offset += d.items.length;
-      appendItems(d.items);
+      await appendItems(d.items);
       updateGalleryDate();
     }
   } catch(e) {
     console.error('Error loading images:', e);
   } finally {
     loading = false;
-    if ($('load-ind')) {
-      $('load-ind').style.display = 'none';
-    }
-    if ($('load-more-btn')) {
-      $('load-more-btn').style.display = hasMore ? 'block' : 'none';
-    }
   }
 }
 
@@ -120,10 +110,53 @@ async function fetchDemo() {
   updateGalleryDate();
 }
 
-function appendItems(batch) {
+// Batch fetch thumbnails (50 at a time for WiFi performance)
+const thumbnailCache = new Map();
+
+async function fetchThumbnailsBatch(ids) {
+  if (DEMO) return; // Demo uses picsum.photos URLs
+
+  const token = localStorage.getItem('auth_token');
+  const headers = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const idsStr = ids.join(',');
+  const r = await fetch(`/api/thumbnails/batch?ids=${idsStr}`, {
+    credentials: 'same-origin',
+    headers
+  });
+
+  if (r.ok) {
+    const data = await r.json();
+    // Cache thumbnails
+    Object.entries(data.thumbnails).forEach(([id, base64]) => {
+      thumbnailCache.set(parseInt(id), `data:image/jpeg;base64,${base64}`);
+    });
+  }
+}
+
+async function appendItems(batch) {
   const grid = $('grid');
-  batch.forEach(item => {
-    const idx = items.length;
+  const startIdx = items.length;
+
+  // Prefetch thumbnails in batches of 50
+  if (!DEMO) {
+    const ids = batch.map(item => item.id);
+    const BATCH_SIZE = 50;
+    const batchPromises = [];
+
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batchIds = ids.slice(i, i + BATCH_SIZE);
+      batchPromises.push(fetchThumbnailsBatch(batchIds));
+    }
+
+    // Fetch all batches in parallel
+    await Promise.all(batchPromises);
+  }
+
+  // Now render with cached thumbnails
+  batch.forEach((item, i) => {
+    const idx = startIdx + i;
     items.push(item);
     const el = document.createElement('div');
     el.className = 'thumb';
@@ -135,11 +168,17 @@ function appendItems(batch) {
     img.style.height = '100%';
     img.style.objectFit = 'cover';
     img.style.display = 'block';
-    img.loading = 'lazy';
     img.decoding = 'async';
-    img.src = DEMO
-      ? `https://picsum.photos/seed/${item.id+100}/300/300`
-      : `/api/thumbnail/${item.id}`;
+
+    // Use cached thumbnail or fallback to API
+    if (thumbnailCache.has(item.id)) {
+      img.src = thumbnailCache.get(item.id);
+    } else {
+      img.loading = 'eager';
+      img.src = DEMO
+        ? `https://picsum.photos/seed/${item.id+100}/400/400`
+        : `/api/thumbnail/${item.id}`;
+    }
     img.alt = item.name;
 
     el.appendChild(img);

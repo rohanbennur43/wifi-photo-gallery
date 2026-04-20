@@ -5,7 +5,10 @@ import json
 import socket
 import mimetypes
 import hashlib
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import base64
+import io
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -36,7 +39,7 @@ else:
     print(f"✓ Generated new secret key: {SECRET_KEY_FILE}")
 
 SESSION_DURATION = timedelta(days=1)
-THUMBNAIL_SIZE = (300, 300)
+THUMBNAIL_SIZE = (400, 400)  # Larger for retina displays on WiFi
 SUPPORTED_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.heic',
     '.mp4', '.mov'
@@ -238,12 +241,18 @@ class GalleryHandler(BaseHTTPRequestHandler):
 
     def send_json(self, data, status=200):
         """Send JSON response"""
+        json_data = json.dumps(data).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(json_data))
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
+        self.wfile.write(json_data)
 
-    def send_file(self, file_path, content_type=None):
+        # Log transfer size
+        size_kb = len(json_data) / 1024
+        print(f"[TRANSFER] {self.path}: {size_kb:.1f} KB (JSON)")
+
+    def send_file(self, file_path, content_type=None, cache=False):
         """Send a file response"""
         try:
             with open(file_path, 'rb') as f:
@@ -256,9 +265,19 @@ class GalleryHandler(BaseHTTPRequestHandler):
                 mime_type, _ = mimetypes.guess_type(file_path)
                 if mime_type:
                     self.send_header('Content-Type', mime_type)
+
+            # Enable aggressive caching for static assets
+            if cache:
+                self.send_header('Cache-Control', 'public, max-age=31536000')  # 1 year
+
+            size_kb = len(content) / 1024
             self.send_header('Content-Length', len(content))
+            self.send_header('Connection', 'keep-alive')  # HTTP keep-alive
             self.end_headers()
             self.wfile.write(content)
+
+            # Log transfer size for monitoring
+            print(f"[TRANSFER] {self.path}: {size_kb:.1f} KB")
         except (BrokenPipeError, ConnectionResetError):
             # Client disconnected - ignore silently (common with prefetching)
             pass
@@ -334,13 +353,58 @@ class GalleryHandler(BaseHTTPRequestHandler):
                             generate_thumbnail(source_path, thumb_path)
 
                     if thumb_path.exists():
-                        self.send_file(thumb_path, 'image/jpeg')
+                        self.send_file(thumb_path, 'image/jpeg', cache=True)
                     else:
                         self.send_error(500, "Failed to generate thumbnail")
                 else:
                     self.send_error(404, "Media not found")
             except (BrokenPipeError, ConnectionResetError):
                 # Client disconnected - ignore silently
+                pass
+            except Exception as e:
+                try:
+                    self.send_error(500, str(e))
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            return
+
+        if path == '/api/thumbnails/batch':
+            if not self.is_authenticated():
+                self.send_error(401, "Unauthorized")
+                return
+
+            try:
+                # Parse IDs from query string
+                query_params = parse_qs(parsed.query)
+                ids_param = query_params.get('ids', [''])[0]
+                if not ids_param:
+                    self.send_json({'error': 'No IDs provided'}, 400)
+                    return
+
+                ids = [int(x) for x in ids_param.split(',') if x.strip()]
+
+                # Generate/fetch thumbnails
+                thumbnails = {}
+                for media_id in ids:
+                    if 0 <= media_id < len(self.media_files):
+                        media = self.media_files[media_id]
+                        source_path = Path(media['path'])
+                        thumb_name = hashlib.md5(media['path'].encode()).hexdigest() + '.jpg'
+                        thumb_path = THUMBNAILS_DIR / thumb_name
+
+                        if not thumb_path.exists():
+                            if media['is_video']:
+                                generate_video_thumbnail(source_path, thumb_path)
+                            else:
+                                generate_thumbnail(source_path, thumb_path)
+
+                        if thumb_path.exists():
+                            with open(thumb_path, 'rb') as f:
+                                thumbnails[str(media_id)] = base64.b64encode(f.read()).decode('utf-8')
+
+                self.send_json({'thumbnails': thumbnails})
+                print(f"[BATCH] Sent {len(thumbnails)} thumbnails")
+            except (BrokenPipeError, ConnectionResetError):
                 pass
             except Exception as e:
                 try:
@@ -384,7 +448,7 @@ class GalleryHandler(BaseHTTPRequestHandler):
                         content_type = 'application/javascript'
                     else:
                         content_type = 'text/plain'
-                    self.send_file(file_path, content_type)
+                    self.send_file(file_path, content_type, cache=True)
                     return
             except Exception as e:
                 print(f"[ERROR] Error serving static file {path}: {e}")
@@ -458,11 +522,17 @@ def register_mdns(port):
         return None
 
 
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in separate threads"""
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def main():
     PORT = 8080
 
     print("=" * 60)
-    print("WiFi Photo Gallery Server")
+    print("WiFi Photo Gallery Server (Threaded)")
     print("=" * 60)
 
     # Scan media files
@@ -470,8 +540,9 @@ def main():
     GalleryHandler.media_files = scan_media_files()
     print(f"✓ Found {len(GalleryHandler.media_files)} media files")
 
-    # Start HTTP server
-    server = HTTPServer(('0.0.0.0', PORT), GalleryHandler)
+    # Start HTTP server with threading
+    server = ThreadedHTTPServer(('0.0.0.0', PORT), GalleryHandler)
+    print(f"✓ Threaded server initialized (unlimited concurrent connections)")
 
     # Register mDNS
     zeroconf = register_mdns(PORT)
