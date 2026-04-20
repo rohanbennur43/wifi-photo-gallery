@@ -272,4 +272,4 @@ MIT License - Free to use and modify
 
 ## Credits
 
-Built with ❤️ for seamless photo browsing across Apple devices
+Built with Python, Pillow, and vanilla JavaScript for seamless photo browsing across Apple devices.
